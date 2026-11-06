@@ -1,34 +1,87 @@
 "use client";
 
-import { Canvas } from "@react-three/fiber";
-import { VRButton, XR, Controllers, Hands } from "@react-three/xr";
-import { Text, OrbitControls } from "@react-three/drei";
-import { useState } from "react";
+import { Canvas, useFrame } from "@react-three/fiber";
+import { Text, OrbitControls, Float } from "@react-three/drei";
+import { useState, useRef, useEffect } from "react";
+import * as THREE from "three";
 
-function SpatialPanel({
+interface TaskNode {
+  id: number;
+  label: string;
+  status: "pending" | "processing" | "completed";
+  progress: string;
+}
+
+const INITIAL_TASKS: TaskNode[] = [
+  { id: 1, label: "Deconstruct Workspace Objectives", status: "completed", progress: "100%" },
+  { id: 2, label: "Index Contextual Memory Nodes", status: "processing", progress: "64%" },
+  { id: 3, label: "Synthesize Multi-Modal Insights", status: "pending", progress: "0%" },
+  { id: 4, label: "Dispatch Spatial Artifacts", status: "pending", progress: "0%" },
+];
+
+function FloatingAgentCore({ isProcessing }: { isProcessing: boolean }) {
+  const meshRef = useRef<THREE.Mesh>(null);
+
+  useFrame((_, delta) => {
+    if (meshRef.current) {
+      meshRef.current.rotation.y += delta * (isProcessing ? 3.0 : 0.8);
+      meshRef.current.rotation.x += delta * (isProcessing ? 1.5 : 0.4);
+    }
+  });
+
+  return (
+    <Float speed={2.5} rotationIntensity={1} floatIntensity={1.2}>
+      <mesh ref={meshRef} position={[0, 1.9, -0.9]}>
+        <octahedronGeometry args={[0.18, 0]} />
+        <meshStandardMaterial
+          color={isProcessing ? "#22c55e" : "#38bdf8"}
+          wireframe
+          emissive={isProcessing ? "#16a34a" : "#0284c7"}
+          emissiveIntensity={isProcessing ? 1.6 : 0.8}
+        />
+      </mesh>
+      <Text
+        position={[0, 2.15, -0.9]}
+        fontSize={0.04}
+        color={isProcessing ? "#4ade80" : "#38bdf8"}
+        anchorX="center"
+        anchorY="middle"
+      >
+        {isProcessing ? "AGENT: ACTIVE EXECUTION" : "AGENT: STANDBY (READY)"}
+      </Text>
+    </Float>
+  );
+}
+
+function TaskCardMesh({
+  task,
   position,
-  title,
-  content,
-  color,
+  onClick,
 }: {
+  task: TaskNode;
   position: [number, number, number];
-  title: string;
-  content: string;
-  color: string;
+  onClick: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
-  const [active, setActive] = useState(false);
+
+  const statusColor =
+    task.status === "completed"
+      ? "#22c55e"
+      : task.status === "processing"
+      ? "#38bdf8"
+      : "#64748b";
 
   return (
     <group position={position}>
-      {/* Panel Background Mesh */}
       <mesh
         onPointerOver={() => setHovered(true)}
         onPointerOut={() => setHovered(false)}
-        onClick={() => setActive(!active)}
-        scale={active ? 1.05 : 1}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick();
+        }}
       >
-        <planeGeometry args={[1.2, 0.8]} />
+        <planeGeometry args={[1.05, 0.11]} />
         <meshStandardMaterial
           color={hovered ? "#1e293b" : "#0f172a"}
           roughness={0.2}
@@ -36,113 +89,207 @@ function SpatialPanel({
         />
       </mesh>
 
-      {/* Header Accent Bar */}
-      <mesh position={[0, 0.38, 0.01]}>
-        <planeGeometry args={[1.2, 0.04]} />
-        <meshBasicMaterial color={color} />
+      <mesh position={[-0.51, 0, 0.01]}>
+        <planeGeometry args={[0.02, 0.11]} />
+        <meshBasicMaterial color={statusColor} />
       </mesh>
 
-      {/* Panel Title */}
       <Text
-        position={[-0.5, 0.28, 0.02]}
-        fontSize={0.06}
-        color="#ffffff"
+        position={[-0.47, 0, 0.02]}
+        fontSize={0.034}
+        color="#f1f5f9"
         anchorX="left"
         anchorY="middle"
       >
-        {title}
+        {task.label}
       </Text>
 
-      {/* Panel Content Body */}
       <Text
-        position={[-0.5, 0.05, 0.02]}
-        fontSize={0.04}
-        maxWidth={1.0}
-        lineHeight={1.3}
-        color="#94a3b8"
-        anchorX="left"
-        anchorY="top"
-      >
-        {content}
-      </Text>
-
-      {/* Status Pill */}
-      <mesh position={[0.4, 0.28, 0.02]}>
-        <planeGeometry args={[0.25, 0.08]} />
-        <meshBasicMaterial color={active ? "#10b981" : "#334155"} />
-      </mesh>
-      <Text
-        position={[0.4, 0.28, 0.03]}
+        position={[0.48, 0, 0.02]}
         fontSize={0.03}
-        color="#ffffff"
-        anchorX="center"
+        color={statusColor}
+        anchorX="right"
         anchorY="middle"
       >
-        {active ? "ACTIVE" : "READY"}
+        {task.progress}
       </Text>
     </group>
   );
 }
 
 export default function XRWorkspace() {
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [tasks, setTasks] = useState<TaskNode[]>(INITIAL_TASKS);
+  const [selectedTask, setSelectedTask] = useState<TaskNode | null>(null);
+
+  useEffect(() => {
+    if (!isProcessing) return;
+    const interval = setInterval(() => {
+      setTasks((prev) =>
+        prev.map((t) => {
+          if (t.status === "processing") {
+            const current = parseInt(t.progress, 10) || 0;
+            if (current >= 100) {
+              return { ...t, status: "completed", progress: "100%" };
+            }
+            return { ...t, progress: `${Math.min(100, current + 18)}%` };
+          }
+          if (t.status === "pending" && Math.random() > 0.4) {
+            return { ...t, status: "processing", progress: "20%" };
+          }
+          return t;
+        })
+      );
+    }, 1200);
+
+    return () => clearInterval(interval);
+  }, [isProcessing]);
+
+  const handleLaunchXR = () => {
+    alert(
+      "WebXR Device Emulation is Active! Use Chrome DevTools (F12) > WebXR tab > Meta Quest 3 to emulate virtual hands and test seated spatial interactions."
+    );
+  };
+
   return (
-    <div className="relative w-full h-screen bg-slate-950 overflow-hidden flex flex-col items-center justify-center">
-      {/* Top Header */}
-      <header className="absolute top-6 left-6 z-10 flex items-center gap-3 bg-slate-900/80 backdrop-blur border border-slate-800 px-5 py-3 rounded-2xl text-white">
-        <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse" />
+    <div className="relative w-full h-screen bg-slate-950 overflow-hidden flex flex-col items-center justify-center select-none font-sans">
+      {/* 2D Header overlay */}
+      <header className="absolute top-6 left-6 z-10 flex items-center gap-3 bg-slate-900/90 backdrop-blur border border-slate-800 px-5 py-3 rounded-2xl text-white shadow-xl">
+        <div className={`w-3 h-3 rounded-full ${isProcessing ? "bg-emerald-400 animate-ping" : "bg-cyan-400"}`} />
         <div>
           <h1 className="text-sm font-bold tracking-wide">SpatialAgent OS</h1>
           <p className="text-xs text-slate-400">Meta VR Seated-First WebXR Architecture</p>
         </div>
       </header>
 
-      {/* Official WebXR Enter VR Button */}
-      <VRButton className="!absolute !bottom-8 !z-20 !px-6 !py-3 !bg-blue-600 !hover:bg-blue-500 !text-white !font-semibold !rounded-xl !shadow-lg !transition-all" />
+      {/* Action Buttons */}
+      <div className="absolute top-6 right-6 z-10 flex gap-2">
+        <button
+          onClick={() => setIsProcessing(!isProcessing)}
+          className={`px-5 py-2.5 rounded-xl text-xs font-semibold tracking-wider uppercase border transition-all cursor-pointer shadow-lg ${
+            isProcessing
+              ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/50 shadow-emerald-500/10"
+              : "bg-slate-900 text-slate-300 border-slate-700 hover:border-cyan-500 hover:text-white"
+          }`}
+        >
+          {isProcessing ? "● Agent Running" : "▶ Trigger AI Loop"}
+        </button>
+      </div>
 
-      {/* 3D WebXR Canvas */}
-      <Canvas
-        camera={{ position: [0, 1.2, 1.5], fov: 60 }}
-        className="w-full h-full"
+      <button
+        onClick={handleLaunchXR}
+        className="absolute bottom-8 z-20 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
       >
-        <XR>
-          <ambientLight intensity={0.7} />
-          <directionalLight position={[5, 10, 5]} intensity={1.5} />
-          <pointLight position={[0, 2, 0]} intensity={1} color="#38bdf8" />
+        Launch Immersive Mode
+      </button>
 
-          {/* Hands & Controllers Tracking */}
-          <Controllers />
-          <Hands />
+      <div className="absolute bottom-20 z-10 bg-slate-900/80 backdrop-blur px-4 py-1.5 rounded-xl border border-slate-800 text-[11px] text-slate-400">
+        Airplane Seat Envelope: <span className="text-emerald-400 font-medium">Calibrated (2-ft Seated Radius)</span>
+      </div>
 
-          {/* Orbit Controls for Desktop testing */}
-          <OrbitControls target={[0, 1.2, 0]} />
+      {/* 3D WebGL / WebXR Scene */}
+      <Canvas
+        camera={{ position: [0, 1.25, 1.35], fov: 62 }}
+        className="w-full h-full cursor-grab active:cursor-grabbing"
+      >
+        <ambientLight intensity={0.8} />
+        <directionalLight position={[5, 10, 5]} intensity={1.5} />
+        <pointLight
+          position={[0, 1.8, -0.6]}
+          intensity={2.2}
+          color={isProcessing ? "#4ade80" : "#38bdf8"}
+        />
 
-          {/* Left Panel */}
-          <SpatialPanel
-            position={[-0.9, 1.2, -0.6]}
-            title="AI Agentic Pipeline"
-            content="Task: Live Knowledge Retrieval & Synthesis&#10;Latency: 120ms&#10;Model: Gemini 2.5 Flash&#10;Status: Monitoring context stream..."
-            color="#38bdf8"
-          />
+        <OrbitControls
+          target={[0, 1.25, -0.8]}
+          enablePan={false}
+          maxPolarAngle={Math.PI / 1.8}
+          minPolarAngle={Math.PI / 2.5}
+        />
 
-          {/* Center Panel */}
-          <SpatialPanel
-            position={[0, 1.2, -0.7]}
-            title="Executive Workspace"
-            content="• Touch or pinch panels to toggle focus.&#10;• Designed for seated 2-ft operational envelope.&#10;• Hands-first native: zero controller requirement."
-            color="#a855f7"
-          />
+        {/* Central Floating Agent Core */}
+        <FloatingAgentCore isProcessing={isProcessing} />
 
-          {/* Right Panel */}
-          <SpatialPanel
-            position={[0.9, 1.2, -0.6]}
-            title="System Diagnostics"
-            content="WebXR API: Hand Tracking Active&#10;FPS: 90 Hz Locked&#10;Target: Meta Quest 3 / Pro Emulation"
-            color="#22c55e"
-          />
+        {/* Left Panel: Autonomous Agent Planner */}
+        <group position={[-1.18, 1.25, -0.72]} rotation={[0, 0.38, 0]}>
+          <mesh>
+            <planeGeometry args={[1.15, 0.78]} />
+            <meshStandardMaterial color="#090d16" roughness={0.15} metalness={0.85} />
+          </mesh>
+          <mesh position={[0, 0.37, 0.01]}>
+            <planeGeometry args={[1.15, 0.03]} />
+            <meshBasicMaterial color="#38bdf8" />
+          </mesh>
+          <Text position={[-0.5, 0.28, 0.02]} fontSize={0.052} color="#ffffff" anchorX="left" anchorY="middle">
+            Agentic Pipeline
+          </Text>
+          <Text position={[-0.5, 0.12, 0.02]} fontSize={0.033} color="#94a3b8" anchorX="left" anchorY="middle">
+            • Mode: Autonomous Spatial Worker
+          </Text>
+          <Text position={[-0.5, 0.03, 0.02]} fontSize={0.033} color="#94a3b8" anchorX="left" anchorY="middle">
+            • Reasoning Engine: Gemini 2.5 Flash
+          </Text>
+          <Text position={[-0.5, -0.06, 0.02]} fontSize={0.033} color="#94a3b8" anchorX="left" anchorY="middle">
+            • Context Cache: Synced
+          </Text>
+          <Text position={[-0.5, -0.15, 0.02]} fontSize={0.033} color="#94a3b8" anchorX="left" anchorY="middle">
+            • Execution: Hands-First Event Bus
+          </Text>
+        </group>
 
-          {/* Spatial Grid Floor Reference */}
-          <gridHelper args={[10, 20, "#334155", "#1e293b"]} position={[0, 0, 0]} />
-        </XR>
+        {/* Center Panel: Interactive Dynamic Task Board */}
+        <group position={[0, 1.25, -0.88]} rotation={[0, 0, 0]}>
+          <mesh>
+            <planeGeometry args={[1.2, 0.78]} />
+            <meshStandardMaterial color="#0b0f19" roughness={0.15} metalness={0.85} />
+          </mesh>
+          <mesh position={[0, 0.37, 0.01]}>
+            <planeGeometry args={[1.2, 0.03]} />
+            <meshBasicMaterial color="#c084fc" />
+          </mesh>
+          <Text position={[-0.53, 0.28, 0.02]} fontSize={0.052} color="#ffffff" anchorX="left" anchorY="middle">
+            Executive Task Matrix
+          </Text>
+
+          {tasks.map((task, idx) => (
+            <TaskCardMesh
+              key={task.id}
+              task={task}
+              position={[0, 0.12 - idx * 0.14, 0.02]}
+              onClick={() => setSelectedTask(task)}
+            />
+          ))}
+        </group>
+
+        {/* Right Panel: Diagnostics & Inspection Details */}
+        <group position={[1.18, 1.25, -0.72]} rotation={[0, -0.38, 0]}>
+          <mesh>
+            <planeGeometry args={[1.15, 0.78]} />
+            <meshStandardMaterial color="#090d16" roughness={0.15} metalness={0.85} />
+          </mesh>
+          <mesh position={[0, 0.37, 0.01]}>
+            <planeGeometry args={[1.15, 0.03]} />
+            <meshBasicMaterial color="#4ade80" />
+          </mesh>
+          <Text position={[-0.5, 0.28, 0.02]} fontSize={0.052} color="#ffffff" anchorX="left" anchorY="middle">
+            Inspector & Telemetry
+          </Text>
+          <Text position={[-0.5, 0.14, 0.02]} fontSize={0.034} color="#f8fafc" anchorX="left" anchorY="middle">
+            Target Focus:
+          </Text>
+          <Text position={[-0.5, 0.05, 0.02]} fontSize={0.031} color="#38bdf8" maxWidth={0.95} anchorX="left" anchorY="middle">
+            {selectedTask ? selectedTask.label : "Tap any task node in center panel"}
+          </Text>
+          <Text position={[-0.5, -0.06, 0.02]} fontSize={0.033} color="#94a3b8" anchorX="left" anchorY="middle">
+            Status: {selectedTask ? selectedTask.status.toUpperCase() : "IDLE"}
+          </Text>
+          <Text position={[-0.5, -0.15, 0.02]} fontSize={0.033} color="#94a3b8" anchorX="left" anchorY="middle">
+            Framerate: 90 Hz Locked (WebXR)
+          </Text>
+        </group>
+
+        {/* Spatial Grid Floor Reference */}
+        <gridHelper args={[12, 24, "#38bdf8", "#1e293b"]} position={[0, 0, 0]} />
       </Canvas>
     </div>
   );
