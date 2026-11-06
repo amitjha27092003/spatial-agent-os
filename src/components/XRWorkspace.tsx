@@ -19,6 +19,25 @@ const INITIAL_TASKS: TaskNode[] = [
   { id: 4, label: "Dispatch Spatial Artifacts", status: "pending", progress: "0%" },
 ];
 
+const playSpatialChime = (freq = 440, duration = 0.12) => {
+  if (typeof window === "undefined") return;
+  try {
+    const audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + duration);
+  } catch {
+    // audio policy ignore
+  }
+};
+
 function FloatingAgentCore({ isProcessing }: { isProcessing: boolean }) {
   const meshRef = useRef<THREE.Mesh>(null);
 
@@ -74,10 +93,14 @@ function TaskCardMesh({
   return (
     <group position={position}>
       <mesh
-        onPointerOver={() => setHovered(true)}
+        onPointerOver={() => {
+          setHovered(true);
+          playSpatialChime(620, 0.05);
+        }}
         onPointerOut={() => setHovered(false)}
         onClick={(e) => {
           e.stopPropagation();
+          playSpatialChime(880, 0.15);
           onClick();
         }}
       >
@@ -121,6 +144,32 @@ export default function XRWorkspace() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [tasks, setTasks] = useState<TaskNode[]>(INITIAL_TASKS);
   const [selectedTask, setSelectedTask] = useState<TaskNode | null>(null);
+  const [activeModel, setActiveModel] = useState("Gemini 2.5 Flash");
+
+  const triggerLiveAgentLoop = async () => {
+    const nextState = !isProcessing;
+    setIsProcessing(nextState);
+    playSpatialChime(nextState ? 523.25 : 329.63, 0.18);
+
+    if (nextState) {
+      try {
+        const res = await fetch("/api/agent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ objective: "Optimize Seated WebXR Workflow" }),
+        });
+        const data = await res.json();
+        if (data.tasks) {
+          setTasks(data.tasks);
+        }
+        if (data.model) {
+          setActiveModel(data.model);
+        }
+      } catch {
+        // fallback
+      }
+    }
+  };
 
   useEffect(() => {
     if (!isProcessing) return;
@@ -132,28 +181,21 @@ export default function XRWorkspace() {
             if (current >= 100) {
               return { ...t, status: "completed", progress: "100%" };
             }
-            return { ...t, progress: `${Math.min(100, current + 18)}%` };
+            return { ...t, progress: `${Math.min(100, current + 15)}%` };
           }
           if (t.status === "pending" && Math.random() > 0.4) {
-            return { ...t, status: "processing", progress: "20%" };
+            return { ...t, status: "processing", progress: "25%" };
           }
           return t;
         })
       );
-    }, 1200);
+    }, 1400);
 
     return () => clearInterval(interval);
   }, [isProcessing]);
 
-  const handleLaunchXR = () => {
-    alert(
-      "WebXR Device Emulation is Active! Use Chrome DevTools (F12) > WebXR tab > Meta Quest 3 to emulate virtual hands and test seated spatial interactions."
-    );
-  };
-
   return (
     <div className="relative w-full h-screen bg-slate-950 overflow-hidden flex flex-col items-center justify-center select-none font-sans">
-      {/* 2D Header overlay */}
       <header className="absolute top-6 left-6 z-10 flex items-center gap-3 bg-slate-900/90 backdrop-blur border border-slate-800 px-5 py-3 rounded-2xl text-white shadow-xl">
         <div className={`w-3 h-3 rounded-full ${isProcessing ? "bg-emerald-400 animate-ping" : "bg-cyan-400"}`} />
         <div>
@@ -162,10 +204,9 @@ export default function XRWorkspace() {
         </div>
       </header>
 
-      {/* Action Buttons */}
       <div className="absolute top-6 right-6 z-10 flex gap-2">
         <button
-          onClick={() => setIsProcessing(!isProcessing)}
+          onClick={triggerLiveAgentLoop}
           className={`px-5 py-2.5 rounded-xl text-xs font-semibold tracking-wider uppercase border transition-all cursor-pointer shadow-lg ${
             isProcessing
               ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/50 shadow-emerald-500/10"
@@ -176,18 +217,12 @@ export default function XRWorkspace() {
         </button>
       </div>
 
-      <button
-        onClick={handleLaunchXR}
-        className="absolute bottom-8 z-20 px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
-      >
-        Launch Immersive Mode
-      </button>
-
-      <div className="absolute bottom-20 z-10 bg-slate-900/80 backdrop-blur px-4 py-1.5 rounded-xl border border-slate-800 text-[11px] text-slate-400">
-        Airplane Seat Envelope: <span className="text-emerald-400 font-medium">Calibrated (2-ft Seated Radius)</span>
+      <div className="absolute bottom-8 z-10 bg-slate-900/80 backdrop-blur px-4 py-1.5 rounded-xl border border-slate-800 text-[11px] text-slate-400 flex items-center gap-2">
+        <span>Airplane Seat Envelope: <span className="text-emerald-400 font-medium">Calibrated (2-ft Seated Radius)</span></span>
+        <span className="text-slate-600">|</span>
+        <span className="text-cyan-400 font-mono">Audio Haptics: Active</span>
       </div>
 
-      {/* 3D WebGL / WebXR Scene */}
       <Canvas
         camera={{ position: [0, 1.25, 1.35], fov: 62 }}
         className="w-full h-full cursor-grab active:cursor-grabbing"
@@ -207,10 +242,8 @@ export default function XRWorkspace() {
           minPolarAngle={Math.PI / 2.5}
         />
 
-        {/* Central Floating Agent Core */}
         <FloatingAgentCore isProcessing={isProcessing} />
 
-        {/* Left Panel: Autonomous Agent Planner */}
         <group position={[-1.18, 1.25, -0.72]} rotation={[0, 0.38, 0]}>
           <mesh>
             <planeGeometry args={[1.15, 0.78]} />
@@ -227,17 +260,16 @@ export default function XRWorkspace() {
             • Mode: Autonomous Spatial Worker
           </Text>
           <Text position={[-0.5, 0.03, 0.02]} fontSize={0.033} color="#94a3b8" anchorX="left" anchorY="middle">
-            • Reasoning Engine: Gemini 2.5 Flash
+            • Engine: {activeModel}
           </Text>
           <Text position={[-0.5, -0.06, 0.02]} fontSize={0.033} color="#94a3b8" anchorX="left" anchorY="middle">
-            • Context Cache: Synced
+            • Context Cache: Synced (Sub-120ms)
           </Text>
-          <Text position={[-0.5, -0.15, 0.02]} fontSize={0.033} color="#94a3b8" anchorX="left" anchorY="middle">
+          <Text position={[-0.5, -1.15, 0.02]} fontSize={0.033} color="#94a3b8" anchorX="left" anchorY="middle">
             • Execution: Hands-First Event Bus
           </Text>
         </group>
 
-        {/* Center Panel: Interactive Dynamic Task Board */}
         <group position={[0, 1.25, -0.88]} rotation={[0, 0, 0]}>
           <mesh>
             <planeGeometry args={[1.2, 0.78]} />
@@ -261,7 +293,6 @@ export default function XRWorkspace() {
           ))}
         </group>
 
-        {/* Right Panel: Diagnostics & Inspection Details */}
         <group position={[1.18, 1.25, -0.72]} rotation={[0, -0.38, 0]}>
           <mesh>
             <planeGeometry args={[1.15, 0.78]} />
@@ -288,7 +319,6 @@ export default function XRWorkspace() {
           </Text>
         </group>
 
-        {/* Spatial Grid Floor Reference */}
         <gridHelper args={[12, 24, "#38bdf8", "#1e293b"]} position={[0, 0, 0]} />
       </Canvas>
     </div>
